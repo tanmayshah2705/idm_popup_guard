@@ -1,0 +1,18 @@
+{
+    "applications": [
+        {
+            "executable": "IDMan.exe",
+            "protectedWindows": {
+                "exactTitles": [
+                    "Download File Info",
+                    "Download complete",
+                    "Duplicate download link",
+                    "Download later"
+                ],
+                "patterns": [
+                    "^[0-9]{1,3}% .+$"
+                ]
+            }
+        }
+    ]
+}
