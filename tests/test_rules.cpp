@@ -49,21 +49,38 @@ int main() {
     assert(engine.evaluate("IDMan.exe", "Download file info") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "download complete") == WindowAction::Close);
 
-    // 6. Test progress pattern regex matches (MUST NOT close)
+    // 6. Test IDM download-progress windows whose title is simply the filename (MUST NOT close)
+    assert(engine.evaluate("IDMan.exe", "ubuntu.iso", /*isProgressWindow=*/true) == WindowAction::Keep);
+    assert(engine.evaluate("IDMan.exe", "setup.exe", /*isProgressWindow=*/true) == WindowAction::Keep);
+    assert(engine.evaluate("IDMan.exe", "movie.mkv", /*isProgressWindow=*/true) == WindowAction::Keep);
+    assert(engine.evaluate("IDMan.exe", "large_file.tar.gz", /*isProgressWindow=*/true) == WindowAction::Keep);
+
+    // Also support progress pattern if present (e.g. "52% ubuntu.iso")
     assert(engine.evaluate("IDMan.exe", "52% ubuntu.iso") == WindowAction::Keep);
     assert(engine.evaluate("IDMan.exe", "7% movie.mkv") == WindowAction::Keep);
     assert(engine.evaluate("IDMan.exe", "100% setup.exe") == WindowAction::Keep);
-    assert(engine.evaluate("IDMan.exe", "83% large file.zip") == WindowAction::Keep);
 
-    // 7. Test unwanted IDM popups and main window (MUST close)
+    // 7. Test IDM version popups (MUST BE CLOSED - not matching any protected rule)
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.42") == WindowAction::Close);
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.41") == WindowAction::Close);
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.40") == WindowAction::Close);
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.xx") == WindowAction::Close);
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.39") == WindowAction::Close);
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 7.00") == WindowAction::Close);
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager") == WindowAction::Close);
+
+    // Even if isProgressWindow was erroneously flagged on a version window, it MUST STILL CLOSE:
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.42", /*isProgressWindow=*/true) == WindowAction::Close);
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.41", /*isProgressWindow=*/true) == WindowAction::Close);
+
+    // 8. Test other unwanted IDM popups (MUST close)
     assert(engine.evaluate("IDMan.exe", "Trial expired") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Registration") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "New version available") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Purchase IDM license") == WindowAction::Close);
-    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.42") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Random Unregistered Dialog") == WindowAction::Close);
 
-    // 8. Test fail-safe behavior with broken / missing config
+    // 9. Test fail-safe behavior with broken / missing config
     Config brokenConfig = loadConfig("non_existent_file.json");
     assert(!brokenConfig.valid);
     RuleEngine brokenEngine(brokenConfig);
@@ -71,6 +88,8 @@ int main() {
     // In fail-safe mode, evaluate MUST NEVER return Close
     assert(brokenEngine.evaluate("IDMan.exe", "Registration") == WindowAction::Keep);
     assert(brokenEngine.evaluate("IDMan.exe", "Trial expired") == WindowAction::Keep);
+    assert(brokenEngine.evaluate("IDMan.exe", "Internet Download Manager 6.42") == WindowAction::Keep);
+
 
     std::cout << "[TEST] All rule and config verification tests PASSED successfully!\n";
     return 0;

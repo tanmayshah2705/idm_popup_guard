@@ -49,8 +49,19 @@ bool RuleEngine::isMonitoredExecutable(const std::string& exeName) const {
     return false;
 }
 
+bool RuleEngine::isIdmVersionTitle(const std::string& title) {
+    // Matches "Internet Download Manager" with or without version numbers:
+    // e.g. "Internet Download Manager 6.42", "Internet Download Manager 6.41",
+    // "Internet Download Manager 6.xx", "Internet Download Manager"
+    static const std::regex versionRegex(
+        R"(^Internet Download Manager(\s+[0-9a-zA-Z]+(\.[0-9a-zA-Z]+)*.*)?$)",
+        std::regex::ECMAScript | std::regex::icase);
+    return std::regex_match(title, versionRegex);
+}
+
 WindowAction RuleEngine::evaluate(const std::string& exeName,
-                                  const std::string& title) const {
+                                  const std::string& title,
+                                  bool isProgressWindow) const {
     // Fail-safe: if engine is invalid, never close anything
     if (!m_valid) {
         return WindowAction::Keep;
@@ -65,14 +76,27 @@ WindowAction RuleEngine::evaluate(const std::string& exeName,
 
         // This executable IS monitored — check if the title is protected
 
-        // Check exact titles (case-sensitive match)
+        // 1. Check exact titles (case-sensitive match)
         for (const auto& protectedTitle : rule.exactTitles) {
             if (title == protectedTitle) {
                 return WindowAction::Keep;
             }
         }
 
-        // Check regex patterns
+        // 2. Version popups (e.g. "Internet Download Manager 6.42", "6.xx", etc.)
+        // and main IDM windows are explicitly UNWANTED and must be closed.
+        // They must never match progress-window or pattern-based protections.
+        if (isIdmVersionTitle(title)) {
+            return WindowAction::Close;
+        }
+
+        // 3. IDM download-progress window (title is simply the filename,
+        // class is #32770, contains msctls_progress32 progress bar).
+        if (isProgressWindow) {
+            return WindowAction::Keep;
+        }
+
+        // 4. Check regex patterns (e.g. "^[0-9]{1,3}% .+$")
         for (const auto& pattern : rule.patterns) {
             try {
                 if (std::regex_match(title, pattern)) {
@@ -92,6 +116,7 @@ WindowAction RuleEngine::evaluate(const std::string& exeName,
     // isMonitoredExecutable was checked first, but fail-safe anyway)
     return WindowAction::Keep;
 }
+
 
 bool RuleEngine::isValid() const {
     return m_valid;

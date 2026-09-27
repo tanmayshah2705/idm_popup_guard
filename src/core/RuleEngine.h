@@ -34,13 +34,20 @@ public:
     //   - Otherwise → Close
     //   - If the engine is invalid → Keep (fail-safe)
     //
-    // exeName: executable filename, e.g. "IDMan.exe"
-    // title:   window title string (UTF-8)
+    // exeName:          executable filename, e.g. "IDMan.exe"
+    // title:            window title string (UTF-8)
+    // isProgressWindow: true if the window is identified as an IDM download-progress window
     WindowAction evaluate(const std::string& exeName,
-                          const std::string& title) const;
+                          const std::string& title,
+                          bool isProgressWindow = false) const;
+
+    // Helper: checks if a title is an IDM version popup or main window title
+    // (e.g. "Internet Download Manager 6.42", "Internet Download Manager 6.xx", "Internet Download Manager")
+    static bool isIdmVersionTitle(const std::string& title);
 
     // Whether the configuration was valid and all rules compiled successfully.
     bool isValid() const;
+
 
 private:
     struct CompiledRule {

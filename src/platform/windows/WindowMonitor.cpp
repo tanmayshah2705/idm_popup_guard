@@ -45,6 +45,40 @@ static std::string wideToUtf8(const wchar_t* wide, int charCount) {
     return result;
 }
 
+// Check if an IDM window is a download-progress window.
+// In IDM, all download-progress windows use class "#32770" and contain a
+// progress bar control ("msctls_progress32").
+static bool isDownloadProgressWindow(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd)) return false;
+
+    wchar_t clsBuf[64] = {};
+    if (GetClassNameW(hwnd, clsBuf, 64) <= 0) return false;
+    if (wcscmp(clsBuf, L"#32770") != 0) return false;
+
+    // Check direct child for progress bar
+    if (FindWindowExW(hwnd, NULL, L"msctls_progress32", NULL) != NULL) {
+        return true;
+    }
+
+    // Check nested children (e.g. within tabs or sub-dialogs)
+    bool hasProgressBar = false;
+    EnumChildWindows(
+        hwnd,
+        [](HWND child, LPARAM lParam) -> BOOL {
+            wchar_t childCls[64] = {};
+            if (GetClassNameW(child, childCls, 64) > 0) {
+                if (wcscmp(childCls, L"msctls_progress32") == 0) {
+                    *reinterpret_cast<bool*>(lParam) = true;
+                    return FALSE;  // Found, stop enumeration
+                }
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&hasProgressBar));
+
+    return hasProgressBar;
+}
+
 // ── WinEvent callback ──────────────────────────────────────────────────
 
 static void CALLBACK WinEventProc(
@@ -92,15 +126,24 @@ static void CALLBACK WinEventProc(
     if (title.empty())
         return;
 
+    // ── Detect IDM download-progress window ──
+    bool isProgress = isDownloadProgressWindow(hwnd);
+
     // ── Evaluate against configured rules ──
-    WindowAction action = g_engine->evaluate(exeName, title);
+    WindowAction action = g_engine->evaluate(exeName, title, isProgress);
 
     if (action == WindowAction::Close) {
         // Send a polite close request (non-blocking).
-        // If the HWND is already invalid, PostMessage simply returns FALSE.
+        // 1. Standard WM_CLOSE
         PostMessageW(hwnd, WM_CLOSE, 0, 0);
+
+        // 2. Also send WM_COMMAND IDCANCEL and IDOK in case the window is a
+        // modal dialog (e.g. MB_OK MessageBox or IDM alert) that ignores WM_CLOSE.
+        PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
+        PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDOK, 0), 0);
     }
 }
+
 
 // ── Public API ─────────────────────────────────────────────────────────
 
