@@ -73,12 +73,23 @@ int main() {
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.42", /*isProgressWindow=*/true) == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.41", /*isProgressWindow=*/true) == WindowAction::Close);
 
-    // 8. Test other unwanted IDM popups (MUST close)
+    // 8. Test unwanted IDM popups including empty-title trial expiration popup (MUST close)
     assert(engine.evaluate("IDMan.exe", "Trial expired") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Registration") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "New version available") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Purchase IDM license") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Random Unregistered Dialog") == WindowAction::Close);
+
+    // Empty-title IDM popup (e.g. trial-expiration popup shown without window title) MUST close:
+    assert(engine.evaluate("IDMan.exe", "", /*isProgressWindow=*/false) == WindowAction::Close);
+
+    // Empty-title window for non-monitored process MUST NOT close:
+    assert(engine.evaluate("chrome.exe", "", /*isProgressWindow=*/false) == WindowAction::Keep);
+    assert(engine.evaluate("notepad.exe", "", /*isProgressWindow=*/false) == WindowAction::Keep);
+
+    // Empty-title progress window with progress bar MUST NOT close:
+    assert(engine.evaluate("IDMan.exe", "", /*isProgressWindow=*/true) == WindowAction::Keep);
+
 
     // 9. Test fail-safe behavior with broken / missing config
     Config brokenConfig = loadConfig("non_existent_file.json");

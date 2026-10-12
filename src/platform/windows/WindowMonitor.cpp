@@ -79,32 +79,42 @@ static bool isDownloadProgressWindow(HWND hwnd) {
     return hasProgressBar;
 }
 
-// ── WinEvent callback ──────────────────────────────────────────────────
+// Check if a window belongs to a system helper class (tooltips, IME, DDE)
+// that should not be treated as user-facing application popups.
+static bool isSystemHelperClass(HWND hwnd) {
+    wchar_t clsBuf[64] = {};
+    if (GetClassNameW(hwnd, clsBuf, 64) <= 0) return false;
 
-static void CALLBACK WinEventProc(
-    HWINEVENTHOOK /*hWinEventHook*/,
-    DWORD         /*event*/,
-    HWND          hwnd,
-    LONG          idObject,
-    LONG          idChild,
-    DWORD         /*dwEventThread*/,
-    DWORD         /*dwmsEventTime*/)
-{
-    // ── Filter to window-level events only ──
-    if (idObject != OBJID_WINDOW || idChild != CHILDID_SELF)
-        return;
+    if (wcscmp(clsBuf, L"tooltips_class32") == 0) return true;
+    if (wcscmp(clsBuf, L"IME") == 0) return true;
+    if (wcscmp(clsBuf, L"MSCTFIME UI") == 0) return true;
+    if (wcscmp(clsBuf, L"OleDdeWndClass") == 0) return true;
 
+    return false;
+}
+
+// Inspect a window and close it if it is an unwanted window belonging to a
+// monitored application.
+static void processWindow(HWND hwnd) {
     // ── Validate the window handle ──
     if (!hwnd || !IsWindow(hwnd))
         return;
 
-    // ── Skip child windows (only top-level windows) ──
+    // ── Only process visible windows ──
+    if (!IsWindowVisible(hwnd))
+        return;
+
+    // ── Skip child windows (only top-level/popup windows) ──
     LONG style = GetWindowLongW(hwnd, GWL_STYLE);
     if (style & WS_CHILD)
         return;
 
     // ── Fail-safe: engine must be present and valid ──
     if (!g_engine || !g_engine->isValid())
+        return;
+
+    // ── Skip system helper classes (IME, DDE, tooltips) ──
+    if (isSystemHelperClass(hwnd))
         return;
 
     // ── Identify the owning process's executable ──
@@ -117,14 +127,14 @@ static void CALLBACK WinEventProc(
         return;
 
     // ── Get the window title (wide → UTF-8) ──
-    wchar_t titleBuf[512];
+    // Note: Do NOT early-return on empty title! Custom IDM popups (such as the
+    // trial-expiration popup) can have an empty window title.
+    wchar_t titleBuf[512] = {};
     int titleLen = GetWindowTextW(hwnd, titleBuf, 512);
-    if (titleLen <= 0)
-        return;  // Empty title → fail-safe, do not close
-
-    std::string title = wideToUtf8(titleBuf, titleLen);
-    if (title.empty())
-        return;
+    std::string title;
+    if (titleLen > 0) {
+        title = wideToUtf8(titleBuf, titleLen);
+    }
 
     // ── Detect IDM download-progress window ──
     bool isProgress = isDownloadProgressWindow(hwnd);
@@ -142,6 +152,24 @@ static void CALLBACK WinEventProc(
         PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
         PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDOK, 0), 0);
     }
+}
+
+// ── WinEvent callback ──────────────────────────────────────────────────
+
+static void CALLBACK WinEventProc(
+    HWINEVENTHOOK /*hWinEventHook*/,
+    DWORD         /*event*/,
+    HWND          hwnd,
+    LONG          idObject,
+    LONG          idChild,
+    DWORD         /*dwEventThread*/,
+    DWORD         /*dwmsEventTime*/)
+{
+    // ── Filter to window-level events only ──
+    if (idObject != OBJID_WINDOW || idChild != CHILDID_SELF)
+        return;
+
+    processWindow(hwnd);
 }
 
 
@@ -185,9 +213,16 @@ bool start(const RuleEngine& engine) {
         return false;
     }
 
+    // ── Initial pass: close any unwanted windows already open on startup ──
+    EnumWindows([](HWND hwnd, LPARAM) -> BOOL {
+        processWindow(hwnd);
+        return TRUE;
+    }, 0);
+
     // ── Message loop ──
     // GetMessage blocks when no messages are pending → zero CPU when idle.
     // WinEvent callbacks are dispatched through this loop.
+
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);

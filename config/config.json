@@ -7,7 +7,9 @@
                     "Download File Info",
                     "Download complete",
                     "Duplicate download link",
-                    "Download later"
+                    "Download later",
+		    "Save As",
+		    "Adding a category to IDM categories list"
                 ],
                 "patterns": [
                     "^[0-9]{1,3}% .+$"
