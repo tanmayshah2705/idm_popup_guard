@@ -61,17 +61,22 @@ int main() {
     assert(engine.evaluate("IDMan.exe", "100% setup.exe") == WindowAction::Keep);
 
     // 7. Test IDM version popups (MUST BE CLOSED - not matching any protected rule)
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.43") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.42") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.41") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.40") == WindowAction::Close);
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.44") == WindowAction::Close);
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.50") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.xx") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.39") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager 7.00") == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager") == WindowAction::Close);
 
     // Even if isProgressWindow was erroneously flagged on a version window, it MUST STILL CLOSE:
+    assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.43", /*isProgressWindow=*/true) == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.42", /*isProgressWindow=*/true) == WindowAction::Close);
     assert(engine.evaluate("IDMan.exe", "Internet Download Manager 6.41", /*isProgressWindow=*/true) == WindowAction::Close);
+
 
     // 8. Test unwanted IDM popups including empty-title trial expiration popup (MUST close)
     assert(engine.evaluate("IDMan.exe", "Trial expired") == WindowAction::Close);

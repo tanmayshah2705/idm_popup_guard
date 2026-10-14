@@ -11,12 +11,33 @@
 // ── Constants ──────────────────────────────────────────────────────────
 
 // These are defined in <winuser.h> but we guard against older SDKs
+#ifndef EVENT_SYSTEM_DIALOGSTART
+#define EVENT_SYSTEM_DIALOGSTART 0x0010
+#endif
 #ifndef EVENT_OBJECT_SHOW
 #define EVENT_OBJECT_SHOW 0x8002
 #endif
 #ifndef EVENT_OBJECT_NAMECHANGE
 #define EVENT_OBJECT_NAMECHANGE 0x800C
 #endif
+
+// Win32 dialog button IDs & notification codes
+#ifndef BM_CLICK
+#define BM_CLICK 0x00F5
+#endif
+#ifndef IDOK
+#define IDOK 1
+#endif
+#ifndef IDCANCEL
+#define IDCANCEL 2
+#endif
+#ifndef IDYES
+#define IDYES 6
+#endif
+#ifndef IDNO
+#define IDNO 7
+#endif
+
 
 // From <oleacc.h> — defined here to avoid pulling in the full header
 #ifndef OBJID_WINDOW
@@ -93,6 +114,40 @@ static bool isSystemHelperClass(HWND hwnd) {
     return false;
 }
 
+// Dismiss/close an unwanted window using standard Win32 mechanisms.
+static void closeUnwantedWindow(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd)) return;
+
+    // 1. Send WM_CLOSE and WM_SYSCOMMAND SC_CLOSE
+    PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    PostMessageW(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+
+    // 2. Click standard dialog dismissal buttons if present:
+    // For MB_YESNO dialogs (e.g. IDM registration reminder: "Do you want to register now? [Yes] [No]"):
+    // IDNO (7) clicks [No] and immediately dismisses the dialog.
+    HWND hNo = GetDlgItem(hwnd, IDNO);
+    if (hNo) {
+        PostMessageW(hNo, BM_CLICK, 0, 0);
+    }
+
+    // For Cancel dialogs: IDCANCEL (2) clicks [Cancel]
+    HWND hCancel = GetDlgItem(hwnd, IDCANCEL);
+    if (hCancel) {
+        PostMessageW(hCancel, BM_CLICK, 0, 0);
+    }
+
+    // For OK-only dialogs: IDOK (1) clicks [OK]
+    HWND hOk = GetDlgItem(hwnd, IDOK);
+    if (hOk) {
+        PostMessageW(hOk, BM_CLICK, 0, 0);
+    }
+
+    // 3. Fallback: post standard dialog dismissal command messages to the dialog procedure
+    PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDNO, BN_CLICKED), reinterpret_cast<LPARAM>(hNo));
+    PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), reinterpret_cast<LPARAM>(hCancel));
+    PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), reinterpret_cast<LPARAM>(hOk));
+}
+
 // Inspect a window and close it if it is an unwanted window belonging to a
 // monitored application.
 static void processWindow(HWND hwnd) {
@@ -143,14 +198,7 @@ static void processWindow(HWND hwnd) {
     WindowAction action = g_engine->evaluate(exeName, title, isProgress);
 
     if (action == WindowAction::Close) {
-        // Send a polite close request (non-blocking).
-        // 1. Standard WM_CLOSE
-        PostMessageW(hwnd, WM_CLOSE, 0, 0);
-
-        // 2. Also send WM_COMMAND IDCANCEL and IDOK in case the window is a
-        // modal dialog (e.g. MB_OK MessageBox or IDM alert) that ignores WM_CLOSE.
-        PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
-        PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDOK, 0), 0);
+        closeUnwantedWindow(hwnd);
     }
 }
 
@@ -181,6 +229,15 @@ bool start(const RuleEngine& engine) {
     g_engine     = &engine;
     g_monitorTid = GetCurrentThreadId();
 
+    // Hook EVENT_SYSTEM_DIALOGSTART — fires when a modal dialog or message box is displayed.
+    HWINEVENTHOOK hookDialog = SetWinEventHook(
+        EVENT_SYSTEM_DIALOGSTART, EVENT_SYSTEM_DIALOGSTART,
+        NULL,
+        WinEventProc,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
     // Hook EVENT_OBJECT_SHOW — fires when a window becomes visible.
     // WINEVENT_OUTOFCONTEXT: no DLL injection.
     // WINEVENT_SKIPOWNPROCESS: ignore our own windows (e.g. error dialog).
@@ -193,6 +250,7 @@ bool start(const RuleEngine& engine) {
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
     if (!hookShow) {
+        if (hookDialog) UnhookWinEvent(hookDialog);
         g_engine = nullptr;
         return false;
     }
@@ -209,6 +267,7 @@ bool start(const RuleEngine& engine) {
 
     if (!hookNameChange) {
         UnhookWinEvent(hookShow);
+        if (hookDialog) UnhookWinEvent(hookDialog);
         g_engine = nullptr;
         return false;
     }
@@ -232,10 +291,12 @@ bool start(const RuleEngine& engine) {
     // ── Cleanup ──
     UnhookWinEvent(hookNameChange);
     UnhookWinEvent(hookShow);
+    if (hookDialog) UnhookWinEvent(hookDialog);
     g_engine = nullptr;
 
     return true;  // Normal exit via WM_QUIT
 }
+
 
 void stop() {
     if (g_monitorTid != 0) {
