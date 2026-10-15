@@ -128,6 +128,20 @@ static void closeUnwantedWindow(HWND hwnd) {
     HWND hNo = GetDlgItem(hwnd, IDNO);
     if (hNo) {
         PostMessageW(hNo, BM_CLICK, 0, 0);
+    } else {
+        // Fallback: search child buttons for "&No" or "No" text
+        EnumChildWindows(hwnd, [](HWND child, LPARAM) -> BOOL {
+            wchar_t cls[32] = {};
+            if (GetClassNameW(child, cls, 32) > 0 && wcscmp(cls, L"Button") == 0) {
+                wchar_t txt[32] = {};
+                GetWindowTextW(child, txt, 32);
+                if (wcscmp(txt, L"&No") == 0 || wcscmp(txt, L"No") == 0) {
+                    PostMessageW(child, BM_CLICK, 0, 0);
+                    return FALSE;
+                }
+            }
+            return TRUE;
+        }, 0);
     }
 
     // For Cancel dialogs: IDCANCEL (2) clicks [Cancel]
@@ -155,14 +169,19 @@ static void processWindow(HWND hwnd) {
     if (!hwnd || !IsWindow(hwnd))
         return;
 
-    // ── Only process visible windows ──
-    if (!IsWindowVisible(hwnd))
-        return;
-
     // ── Skip child windows (only top-level/popup windows) ──
     LONG style = GetWindowLongW(hwnd, GWL_STYLE);
     if (style & WS_CHILD)
         return;
+
+    // ── Window must have WS_VISIBLE style ──
+    // Note: Do NOT use IsWindowVisible(hwnd)! In Win32, IsWindowVisible() checks whether
+    // all owner/parent windows are visible. If a dialog is owned by IDM's main window
+    // (which is hidden in the system tray), IsWindowVisible() returns FALSE even though
+    // the dialog is physically visible on the desktop. We check the window's own WS_VISIBLE bit.
+    if (!(style & WS_VISIBLE))
+        return;
+
 
     // ── Fail-safe: engine must be present and valid ──
     if (!g_engine || !g_engine->isValid())
